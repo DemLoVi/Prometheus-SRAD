@@ -42,6 +42,10 @@ float gpsLng;
 float pStart = 1013.25; // давление на земле
 float lastAlitude = 0; // последняя высота для вариометра
 
+File dataFile;
+
+void write_sys_log (String dataString);
+
 void get_base_data(){ // тут мы получаем всю основную информацию
   sensors_event_t event; // что то для работы акселерометра
   accel.getEvent(&event);
@@ -102,7 +106,7 @@ void get_GPS_data() {
 }
 
 void write_sys_log (String dataString) { // функция для записи логов
-  File dataFile = SD.open("/syslog.txt", FILE_APPEND);
+  dataFile = SD.open("/syslog.txt", FILE_APPEND);
   dataFile.print(millis());
   dataFile.print(" - ");
   dataFile.println(dataString);
@@ -110,7 +114,7 @@ void write_sys_log (String dataString) { // функция для записи �
 }
 
 void write_data (String dataString) { // функция для записи данных
-  File dataFile = SD.open("/data.txt", FILE_APPEND);
+  dataFile = SD.open("/data.txt", FILE_APPEND);
   dataFile.println(dataString);
   dataFile.close();
 }
@@ -127,15 +131,17 @@ void setup() {
   }
   Serial.println("initialization done.");
 
-  File dataFile = SD.open("/syslog.txt", FILE_WRITE); // тут мы используя FILE_WRITE очищаем старые данные
+  dataFile = SD.open("/syslog.txt", FILE_WRITE); // тут мы используя FILE_WRITE очищаем старые данные
   dataFile.print(millis());
   dataFile.print(" - ");
   dataFile.print("System init start");
+  dataFile.close();
 
-  File dataFile = SD.open("/data.txt", FILE_WRITE);
+  dataFile = SD.open("/data.txt", FILE_WRITE);
   dataFile.print(millis());
   dataFile.print(" - ");
   dataFile.print("System init start");
+  dataFile.close();
 
   Serial.println("============================================"); // просто отлладка
   Serial.println("  Инициализация датчиков...");
