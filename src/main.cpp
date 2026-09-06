@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <SPI.h>
+#include <SD.h>
 #include <math.h>
 
 #include <Adafruit_Sensor.h>
@@ -20,25 +21,25 @@ bool dmpReady = false;
 #define I2C_SDA 21
 #define I2C_SCL 22
 
+#define SD_CS 4 // пин СД карты
+
 BMP390 bmp(I2C_SDA, I2C_SCL);
-uint32_t tmrADXL = 0;   
-uint32_t tmrMPU  = 0;   
-uint32_t tmrBMP  = 0;  
-uint32_t lastBaroTime = 0;
 
-float accelData[3];
-float angleData[3];
-float pressure;
+uint32_t lastBaroTime = 0; // таймер вариометра
 
-float pStart = 1013.25; 
-float altitude = 0;     
-float lastAlitude = 0;
-float vs = 0;
+float accelData[3]; // ускорения
+float angleData[3]; // углы
+float pressure;     // давление
+float altitude = 0; // высота    
+float vs = 0;       // вертикальная скорость
 
-void get_base_data(){
-  sensors_event_t event;
+float pStart = 1013.25; // давление на земле
+float lastAlitude = 0; // последняя высота для вариометра
+
+void get_base_data(){ // тут мы получаем всю основную информацию
+  sensors_event_t event; // что то для работы акселерометра
   accel.getEvent(&event);
-  accelData [0] = event.acceleration.x;
+  accelData [0] = event.acceleration.x; // всего в три строки получаем все ускорения, я было чуть не пропустил этот блок
   accelData [1] = event.acceleration.y;
   accelData [2] = event.acceleration.z;
 
@@ -53,13 +54,13 @@ void get_base_data(){
       mpu.dmpGetGravity(&gravity, &q);
       mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
       
-      angleData[0] = degrees (ypr[0]);
+      angleData[0] = degrees (ypr[0]); // углы
       angleData[1] = degrees (ypr[1]);
       angleData[2] = degrees (ypr[2]);
     }
   }
 
-  bmp3_data data = bmp.get_bmp_values();
+  bmp3_data data = bmp.get_bmp_values(); // давление, высота, вертикальная скорость
   if (data.success) {
     uint32_t currentTime = millis();
     float dt = (currentTime - lastBaroTime);
@@ -79,16 +80,49 @@ void get_base_data(){
     }
 
   } else {
-    Serial.println("[BMP390]  Ошибка чтения данных!");
+    Serial.println("[BMP390]  Ошибка чтения данных!"); // ловим ошибки чтения данных
+    write_sys_log("ERR: bmp390 get data error");
   }
 }
+
+void write_sys_log (String dataString) { // функция для записи логов
+  File dataFile = SD.open("/syslog.txt", FILE_APPEND);
+  dataFile.print(millis());
+  dataFile.print(" - ");
+  dataFile.println(dataString);
+  dataFile.close();
+}
+
+void write_data (String dataString) { // функция для записи данных
+  File dataFile = SD.open("/data.txt", FILE_APPEND);
+  dataFile.println(dataString);
+  dataFile.close();
+}
+
 
 
 void setup() {
   Serial.begin(115200);
-  delay(1500); 
+  while (!Serial);
 
-  Serial.println("============================================");
+  Serial.print("Initializing SD card..."); // Подключаем карту
+  if(!SD.begin(SD_CS)) {
+    Serial.println("initialization failed!");
+    while (true);
+  }
+  Serial.println("initialization done.");
+
+  File dataFile = SD.open("/syslog.txt", FILE_WRITE); // тут мы используя FILE_WRITE очищаем старые данные
+  dataFile.print(millis());
+  dataFile.print(" - ");
+  dataFile.print("System init start");
+
+  File dataFile = SD.open("/data.txt", FILE_WRITE);
+  dataFile.print(millis());
+  dataFile.print(" - ");
+  dataFile.print("System init start");
+
+  Serial.println("============================================"); // просто отлладка
   Serial.println("  Инициализация датчиков...");
   Serial.println("============================================");
 
@@ -98,6 +132,8 @@ void setup() {
   Serial.print("[1/3] ADXL375 (I2C)... ");
   if (!accel.begin()) {
     Serial.println("НЕ НАЙДЕН!");
+    write_sys_log("FATAL: adxl375 init fail"); // лог
+    while (true); // и полная остановка
   } else {
     accel.setTrimOffsets(0, 0, 0);
     delay(200);
@@ -106,13 +142,16 @@ void setup() {
     int16_t rz = accel.getZ();
     accel.setTrimOffsets(-(rx+2)/4, -(ry+2)/4, -(rz-20+2)/4);
     Serial.println("ok");
+    write_sys_log("INFO: adxl375 pass"); // лог
   }
 
-  Serial.print("[1/2] MPU6050 (I2C)... ");
+  Serial.print("[2/3] MPU6050 (I2C)... ");
   mpu.initialize();
 
   if (!mpu.testConnection()) {
     Serial.println("НЕ НАЙДЕН! Проверь SDA=21, SCL=22.");
+    write_sys_log("FATAL: mpu6050 init fail"); // лог
+    while (true); // и полная остановка
   } else {
     uint8_t devStatus = mpu.dmpInitialize();
     if (devStatus == 0) {
@@ -127,23 +166,31 @@ void setup() {
       mpu.setDMPEnabled(true);
       dmpReady = true;
       Serial.println("ok (DMP включён)");
+      write_sys_log("INFO: mpu6050 pass DMP ok"); // лог
     } else {
       Serial.print("ОШИБКА DMP: код ");
       Serial.println(devStatus);
+      write_sys_log("ERR: dmp fail, err code:"); // тоже логи
+      write_sys_log(String(devStatus));
     }
   }
 
  
-  Serial.print("[2/2] BMP390 (I2C)... ");
+  Serial.print("[3/3] BMP390 (I2C)... ");
   bmp3_data testData = bmp.get_bmp_values();
   if (testData.success) {
     Serial.println("ok");
+    write_sys_log("INFO: bmp390 pass"); //лог
   } else {
     Serial.println("НЕ НАЙДЕН! Проверь SDA=21, SCL=22.");
+    write_sys_log("FATAL: bmp390 init fail"); //лог
+    while (true); // и полная остановка
   }
 
+  write_sys_log("INFO: subsystems init comlete"); //лог
+
   
-  Serial.print("Запись стартового давления pStart... ");
+  Serial.print("Запись стартового давления pStart... "); // начинаем работать
   float pSum = 0;
   int samples = 0;
   for (int i = 0; i < 20; i++) {
@@ -159,16 +206,19 @@ void setup() {
   Serial.print("pStart = ");
   Serial.print(pStart);
   Serial.println(" hPa");
+
+  write_sys_log("INFO: ground pressure: "); //лог
+  write_sys_log(String(pStart)); //лог
 }
 
-void loop() {
-  uint32_t now = millis();
+void loop() { // тут уже всё серьезно и пытаеся по минимуму что либо делать
+  uint32_t now = millis(); //! записываем время на всякий, потом УБРАТЬ
 
   get_base_data();
 
   //Serial.print(now); Serial.print(", ");
 
-  Serial.print( accelData  [0] ); Serial.print(", ");
+  Serial.print( accelData  [0] ); Serial.print(", "); //! тут выводим все данные, потом убрать, это чисто отладка
   Serial.print( accelData  [1] ); Serial.print(", ");
   Serial.print( accelData  [2] ); Serial.print(", ");
 
