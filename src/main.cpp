@@ -24,6 +24,7 @@ BMP390 bmp(I2C_SDA, I2C_SCL);
 uint32_t tmrADXL = 0;   
 uint32_t tmrMPU  = 0;   
 uint32_t tmrBMP  = 0;  
+uint32_t lastBaroTime = 0;
 
 float accelData[3];
 float angleData[3];
@@ -31,6 +32,8 @@ float pressure;
 
 float pStart = 1013.25; 
 float altitude = 0;     
+float lastAlitude = 0;
+float vs = 0;
 
 void get_base_data(){
   sensors_event_t event;
@@ -58,12 +61,21 @@ void get_base_data(){
 
   bmp3_data data = bmp.get_bmp_values();
   if (data.success) {
+    uint32_t currentTime = millis();
+    float dt = (currentTime - lastBaroTime);
 
     pressure = data.pressure/100.0;
 
     if (pStart > 0 && pressure > 0) {
       altitude = 44330.0 * (1.0 - pow(pressure / pStart, 0.1903));
       if (altitude < 0) altitude = 0; // Отсекаем отрицательный шум у земли
+    }
+
+    if (dt > 10) {
+      vs = (altitude - lastAlitude) / (dt / 1000);
+
+      lastBaroTime = currentTime;
+      lastAlitude = altitude;
     }
 
   } else {
@@ -165,6 +177,6 @@ void loop() {
   Serial.print(angleData  [2] ); Serial.print(", ");
 
   Serial.print(pressure); Serial.print(", ");
-
-  Serial.println(altitude);
+  Serial.print(altitude); Serial.print(", ");
+  Serial.println(vs);
 }
