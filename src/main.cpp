@@ -42,6 +42,14 @@ float gpsLng;
 float pStart = 1013.25; // давление на земле
 float lastAlitude = 0; // последняя высота для вариометра
 
+String smsPhone = "";
+String smsText  = "";
+bool isBusy     = false; // Флаг: занят ли GSM-модуль отправкой
+
+enum GSMState { IDLE, SET_FORMAT, SET_NUMBER, SEND_TEXT };
+GSMState gsmState = IDLE;
+unsigned long gsmTimer = 0;
+
 void get_base_data(){ // тут мы получаем всю основную информацию
   sensors_event_t event; // что то для работы акселерометра
   accel.getEvent(&event);
@@ -111,10 +119,61 @@ void write_data (String dataString) { // функция для записи да
   dataFile.close();
 }
 
+void processGSM() {
+  if (!isBusy) return;
+
+  switch (gsmState) {
+    case IDLE:
+      Serial2.print("AT+CMGF=1\r");
+      gsmState = SET_FORMAT;
+      gsmTimer = millis();
+      break;
+
+    case SET_FORMAT:
+      if (Serial2.find("OK")) {
+        Serial2.print("AT+CMGS=\"" + smsPhone + "\"\r");
+        gsmState = SET_NUMBER;
+        gsmTimer = millis();
+      } else if (millis() - gsmTimer > 5000) { isBusy = false; } // Тайм-аут 5 сек
+      break;
+
+    case SET_NUMBER:
+      if (Serial2.find(">")) {
+        Serial2.print(smsText);
+        Serial2.write((char)26); // CTRL+Z
+        gsmState = SEND_TEXT;
+        gsmTimer = millis();
+      } else if (millis() - gsmTimer > 5000) { isBusy = false; }
+      break;
+
+    case SEND_TEXT:
+      if (Serial2.find("OK")) {
+        isBusy = false;
+      } else if (millis() - gsmTimer > 10000) { isBusy = false; } // На отправку 10 сек
+      break;
+  }
+}
+
+bool sendSMS(String phone, String text) {
+  if (isBusy) return false; // Если модуль уже шлет SMS, игнорируем новое
+
+  smsPhone = phone;
+  smsText = text;
+  isBusy = true;
+  gsmState = IDLE; // Запускаем автомат
+  return true;
+}
+
+void send_GSM_data () {
+
+}
+
 
 void setup() {
   Serial.begin(115200);
+  Serial2.begin(9600);
   while (!Serial);
+  while (!Serial2);
 
   Serial.print("Initializing SD card..."); // Подключаем карту
   if(!SD.begin(SD_CS)) {
