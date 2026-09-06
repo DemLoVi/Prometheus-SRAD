@@ -4,6 +4,8 @@
 #include <SD.h>
 #include <math.h>
 
+#include <TinyGPSPlus.h>
+
 #include <Adafruit_Sensor.h>
 #include <Adafruit_ADXL375.h>
 
@@ -32,6 +34,10 @@ float angleData[3]; // углы
 float pressure;     // давление
 float altitude = 0; // высота    
 float vs = 0;       // вертикальная скорость
+
+int gpsSats; // сюда все данные по спутникам и координатам
+float gpsLat;
+float gpsLng;
 
 float pStart = 1013.25; // давление на земле
 float lastAlitude = 0; // последняя высота для вариометра
@@ -85,6 +91,12 @@ void get_base_data(){ // тут мы получаем всю основную и
   }
 }
 
+void get_GPS_data() {
+  // тут нужно получать данные от ЖПС, а именно:
+  // координаты, количество спутников
+  // всё это тоже в глобальные переменные и потом будем обрабатывать
+}
+
 void write_sys_log (String dataString) { // функция для записи логов
   File dataFile = SD.open("/syslog.txt", FILE_APPEND);
   dataFile.print(millis());
@@ -98,7 +110,6 @@ void write_data (String dataString) { // функция для записи да
   dataFile.println(dataString);
   dataFile.close();
 }
-
 
 
 void setup() {
