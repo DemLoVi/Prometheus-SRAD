@@ -60,8 +60,8 @@ unsigned long gsmTimer = 0;
 // ===== ФИЛЬТР КАЛМАНА ДЛЯ БАРОМЕТРА =====
 float kalman_altitude = 0.0;
 float kalman_pc = 0.0;
-float kalman_q = 0.125; // Шум процесса
-float kalman_r = 1.0;   // Шум измерений BMP390
+float kalman_q = 0.0005; // Шум процесса
+float kalman_r = 0.1;   // Шум измерений BMP390
 float kalman_k = 0.0;
 bool kalman_initialized = false;
 
@@ -136,22 +136,29 @@ void get_base_data() {
   bmp3_data data = bmp.get_bmp_values();
   if (data.success) {
     uint32_t currentTime = millis();
-    float dt = (currentTime - lastBaroTime);
 
-    pressure = data.pressure / 100.0f;
+  // Выполняем опрос и расчет строго по таймеру
+  if (currentTime - lastBaroTime >= 30) {
+    float dt = (currentTime - lastBaroTime) / 1000.0f; // dt в секундах
+    lastBaroTime = currentTime;
 
-    if (pStart > 0 && pressure > 0) {
-      float rawAltitude = 44330.0f * (1.0f - pow(pressure / pStart, 0.1903f));
-      if (rawAltitude < 0) rawAltitude = 0;
+    bmp3_data data = bmp.get_bmp_values();
+    if (data.success) {
+      pressure = data.pressure / 100.0f;
 
-      altitude = kalman_filter(rawAltitude);
+      if (pStart > 0 && pressure > 0) {
+        float rawAltitude = 44330.0f * (1.0f - pow(pressure / pStart, 0.1903f));
+        if (rawAltitude < 0) rawAltitude = 0;
+
+        // 1. Фильтруем высоту
+        altitude = kalman_filter(rawAltitude);
+
+        // 2. Считаем скорость по актуальному dt
+        vs = (altitude - lastAlitude) / dt;
+        lastAlitude = altitude;
+      }
     }
-
-    if (dt > 10) {
-      vs = (altitude - lastAlitude) / (dt / 1000.0f);
-      lastBaroTime = currentTime;
-      lastAlitude = altitude;
-    }
+  }
   } else {
     Serial.println("[BMP390] Ошибка чтения данных!");
     write_sys_log("ERR: bmp390 get data error");
@@ -227,10 +234,7 @@ void send_GSM_data () {
 // ===== SETUP =====
 void setup() {
   Serial.begin(115200);
-  Serial1.begin(9600);
-  Serial2.begin(115200);
   while (!Serial);
-  while (!Serial2);
 
   Serial.print("Initializing SD card...");
   if (!SD.begin(SD_CS)) {
@@ -325,7 +329,7 @@ void setup() {
   write_sys_log("INFO: gps serial1 init");
 
   // 5. GSM (Serial2)
-  Serial2.begin(9600, SERIAL_8N1, GSM_RX_PIN, GSM_TX_PIN);
+  Serial2.begin(115200, SERIAL_8N1, GSM_RX_PIN, GSM_TX_PIN);
   write_sys_log("INFO: gsm serial2 init");
 
   write_sys_log("INFO: subsystems init complete");
@@ -359,6 +363,9 @@ void loop() {
   get_base_data();
   get_GPS_data();
 
+  if (now - lastSDWriteTime >= 1000) {
+    lastSDWriteTime = now;
+
   // Вывод в Serial-монитор (отладка)
   Serial.print(accelData[0]); Serial.print(", ");
   Serial.print(accelData[1]); Serial.print(", ");
@@ -375,6 +382,8 @@ void loop() {
   Serial.print(gpsSats); Serial.print(", ");
   Serial.print(gpsLat, 6); Serial.print(", ");
   Serial.println(gpsLng, 6);
+
+  }
 
   // Запись на SD-карту раз в 100 мс (10 Гц) без задержки loop()
   if (now - lastSDWriteTime >= 100) {
